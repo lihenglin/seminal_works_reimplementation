@@ -91,11 +91,12 @@ class TransformerEncoder(nn.Module):
         self.transformer = nn.Sequential(
             *[TransformerEncoderBlock(d_model, num_heads, dropout_rate) for _ in range(6)]
         )
+        self.norm = nn.LayerNorm(d_model)
         self.classifier = nn.Linear(d_model, num_classes)
 
     def forward(self, x):
-        emb = F.dropout(self.emb_lookup(x) * self.emb_scale + self.pos_emb_lookup(x), p=self.dropout_rate)
-        return self.classifier(self.transformer(emb))
+        emb = F.dropout(self.emb_lookup(x) * self.emb_scale + self.pos_emb_lookup(x), p=self.dropout_rate) # NOTE: I can't find a reasonable explanation for self.emb_scale, but seems to be what people usually do
+        return self.classifier(self.norm(self.transformer(emb)))
 
 
 class TransformerDecoderBlock(nn.Module):
