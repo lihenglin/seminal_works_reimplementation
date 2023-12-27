@@ -1,5 +1,3 @@
-# TODO: For now, only think about arhicecture and don't worry about underlying computation like FlashAttention
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -57,9 +55,9 @@ class TransformerEncoderBlock(nn.Module):
         )
         self.ffn_norm = nn.LayerNorm(d_model)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         # Pre-Norm architecture is less sensitive to learning rate warmup
-        x = x + F.dropout(self.mha(self.mha_norm(x)), p=self.dropout_rate)
+        x = x + F.dropout(self.mha(self.mha_norm(x), mask), p=self.dropout_rate)
         x = x + F.dropout(self.ffn(self.ffn_norm(x)), p=self.dropout_rate) 
         return x
 
@@ -94,9 +92,9 @@ class TransformerEncoder(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.classifier = nn.Linear(d_model, num_classes)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         emb = F.dropout(self.emb_lookup(x) * self.emb_scale + self.pos_emb_lookup(x), p=self.dropout_rate) # NOTE: I can't find a reasonable explanation for self.emb_scale, but seems to be what people usually do
-        return self.classifier(self.norm(self.transformer(emb)))
+        return self.classifier(self.norm(self.transformer(emb, mask)))
 
 
 class TransformerDecoderBlock(nn.Module):
@@ -119,8 +117,61 @@ class TransformerDecoder(nn.Module):
         pass
 
 
+class LM(nn.Module):
+    
+    def __init__(self, num_classes=10, max_seq_len=1024):
+        super(LM, self).__init__()
+        self.transformer = TransformerEncoder(num_classes=num_classes, max_seq_len=max_seq_len)
+        self.mask = torch.triu(torch.full((max_seq_len, max_seq_len), float('-inf')), diagonal=1)
 
+    def forward(self, x):
+        # TODO: append a null token at the beginning of the sequence
+        pass
+
+
+### Just for testing purpose ###
+""" Borrow from here (https://github.com/hengyuan-hu/jax-vs-pytorch) """
+import numpy as np
+import random
+
+class Enwik9Loader:
+    """Iterator that returns shuffled slices of Enwik9"""
+
+    def __init__(self, batch_size: int, seq_len: int, datapath: str):
+        self.arr = np.fromfile(datapath, dtype=np.uint8)
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+
+    def __iter__(self):
+        # Make slice boundaries randomized across epochs
+        offset = random.randint(0, self.seq_len - 1)
+        offset_len = self.arr.size - offset
+        seqs = offset_len // self.seq_len
+        slices = np.array(
+            [
+                self.arr[start : start + self.seq_len]
+                for start in range(offset, offset + seqs * self.seq_len, self.seq_len)
+            ]
+        )
+        np.random.default_rng().shuffle(slices)
+        short_batch = len(slices) % self.batch_size
+        batches = [
+            slices[start : start + self.batch_size]
+            for start in range(0, len(slices) - short_batch, self.batch_size)
+        ]
+        return iter(batches)
 
 if __name__ == '__main__':
     # TODO: [Test] use enwik9 and monitor loss
-    pass
+    dataloader = list(Enwik9Loader(batch_size=100, seq_len=256, datapath='data/enwik9'))
+    num_classes, max_seq_len = 256, 256
+
+    LM = LM(num_classes, max_seq_len)
+    optimizer = torch.optim.Adam()
+
+    for i, batch in enumerate(dataloader):
+        # TODO: what does the data look like? words or dicrete tokens?
+        print(batch)
+        pass
+
+    # TODO: low precision training
